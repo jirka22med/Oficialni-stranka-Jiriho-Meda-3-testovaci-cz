@@ -1,7 +1,7 @@
 // ============================================================
 // google-auth.js  — nahrazuje supabase.js
 // Firebase Auth s Google Sign-In
-// ZMĚNA: signInWithPopup → signInWithRedirect (fix pro GitHub Pages COOP)
+// FIX: getRedirectResult() před onAuthStateChanged
 // ============================================================
 
 document.addEventListener('DOMContentLoaded', async function() {
@@ -13,31 +13,38 @@ document.addEventListener('DOMContentLoaded', async function() {
         loadingIndicatorElement.classList.remove('hidden');
     }
 
-    if (typeof firebase === 'undefined' || typeof firebase.initializeApp !== 'function') {
+    if (typeof firebase === 'undefined') {
         console.error('Firebase library not loaded.');
-        if (loadingIndicatorElement) {
-            loadingIndicatorElement.textContent = 'Kritická chyba: Knihovna Firebase se nenačetla.';
-        }
+        if (loadingIndicatorElement) loadingIndicatorElement.textContent = 'Kritická chyba: Firebase se nenačetl.';
         document.body.style.visibility = 'visible';
         return;
     }
 
     // ============================================================
-    // NOVÉ: Zkontrolujeme výsledek redirect přihlášení
-    // Toto se spustí po návratu z Google přihlašovací stránky
+    // KROK 1: Nejdřív zpracujeme výsledek redirect přihlášení
+    // Musí být PŘED onAuthStateChanged listenером
     // ============================================================
     try {
+        showLoading("Kontroluji přihlášení...");
         const result = await firebase.auth().getRedirectResult();
         if (result && result.user) {
             console.log("✅ Google redirect přihlášení úspěšné:", result.user.displayName);
+        } else {
+            console.log("ℹ️ Žádný redirect výsledek — normální načtení stránky.");
         }
     } catch (error) {
-        console.error("❌ Chyba při redirect přihlášení:", error);
-        const errorEl = document.getElementById('auth-error-message');
-        if (errorEl) errorEl.textContent = error.message || 'Přihlášení selhalo.';
+        console.error("❌ Chyba při getRedirectResult:", error);
+        // Zobrazíme chybu uživateli
+        if (typeof showAlertModal === 'function') {
+            showAlertModal("Chyba přihlášení", error.message || "Přihlášení selhalo. Zkuste to znovu.");
+        }
+    } finally {
+        if (typeof hideLoading === 'function') hideLoading();
     }
 
-    // --- Auth state listener ---
+    // ============================================================
+    // KROK 2: Teprve teď nastavíme Auth state listener
+    // ============================================================
     let _authInitialized = false;
 
     firebase.auth().onAuthStateChanged((user) => {
@@ -50,8 +57,8 @@ document.addEventListener('DOMContentLoaded', async function() {
             console.log("🔐 Přihlášen:", user.displayName || user.email, "| UID:", user.uid);
             currentUserId = user.uid;
 
-            if (loginBtn)    loginBtn.classList.add('hidden');
-            if (editModeBtn) editModeBtn.classList.remove('hidden');
+            if (loginBtn)      loginBtn.classList.add('hidden');
+            if (editModeBtn)   editModeBtn.classList.remove('hidden');
             if (userIdSpan)    userIdSpan.textContent = user.uid;
             if (userIdDisplay) userIdDisplay.classList.remove('hidden');
 
@@ -75,6 +82,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             try { localStorage.removeItem(EDIT_MODE_KEY); } catch(e) {}
         }
 
+        // Inicializace stránky — jen jednou
         if (!_authInitialized) {
             _authInitialized = true;
             initializeApp();
@@ -129,21 +137,19 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ============================================================
-// HLAVNÍ ZMĚNA: signInWithRedirect místo signInWithPopup
-// Žádný popup → žádná COOP chyba na GitHub Pages
+// signInWithRedirect — žádný popup, žádná COOP chyba
 // ============================================================
 window.signInWithGoogle = async function() {
     try {
         const provider = new firebase.auth.GoogleAuthProvider();
         provider.setCustomParameters({ prompt: 'select_account' });
-        // Přesměruje uživatele na Google přihlašovací stránku
         await firebase.auth().signInWithRedirect(provider);
-        // Kód pod tímto řádkem se nespustí — stránka se přesměruje
+        // Po tomto řádku se stránka přesměruje na Google
     } catch (error) {
         console.error("❌ Chyba Google přihlášení:", error);
         let msg = "Přihlášení selhalo.";
         if (error.code === 'auth/network-request-failed') msg = "Chyba sítě. Zkontrolujte připojení.";
-        if (error.code === 'auth/unauthorized-domain')    msg = "Tato doména není povolena v Firebase konzoli.";
+        if (error.code === 'auth/unauthorized-domain')    msg = "Tato doména není povolena v Firebase konzoli. Přidej localhost a jirka22med.github.io do Authorized domains.";
         throw { code: error.code, message: msg };
     }
 };
